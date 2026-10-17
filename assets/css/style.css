@@ -267,7 +267,8 @@ p{margin:0 0 1rem}
 .bk-side{border-radius:18px;background:var(--cream);border:1px solid var(--line);padding:1.1rem 1.2rem;align-self:start}
 .bk-side h3{font-size:1.25rem;margin-bottom:.6rem}
 .recap{margin:0;display:grid;gap:.55rem}
-.recap div{display:grid;grid-template-columns:minmax(6.5rem,auto) 1fr;gap:.2rem .8rem;font-size:.92rem}
+.recap div{display:grid;grid-template-columns:8.6rem 1fr;gap:.2rem .8rem;font-size:.92rem}
+@media(max-width:380px){.recap div{grid-template-columns:7.6rem 1fr}}
 .bk-side .recap div{grid-template-columns:1fr;gap:0}
 .bk-side .recap dt{font-size:.78rem}
 .recap dt{color:var(--muted)}
