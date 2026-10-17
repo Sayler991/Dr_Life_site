@@ -81,6 +81,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     res.waOk = res.wa.startsWith('https://wa.me/213552998411?text=') && res.wa.includes(res.ref);
     await pg.evaluate(() => document.getElementById('bk-ref').scrollIntoView({ block: 'center' })); await sleep(500);
     await pg.screenshot({ path: OUT + tag + '_' + String(n++).padStart(2, '0') + '_booking_5_confirmation.png' });
+    res.errsNormalFlow = res.errs.slice(); res.badNormalFlow = res.bad.slice();
     // ---- double réservation du même créneau (appel direct de l'API publique)
     const rpc = (payload) => pg.evaluate(async (payload) => {
       const C = window.DL_CONFIG; const r = await fetch(C.SUPABASE_URL + '/rest/v1/rpc/book_appointment', { method: 'POST', headers: { apikey: C.SUPABASE_ANON_KEY, 'Content-Type': 'application/json', 'Content-Profile': 'drlife' }, body: JSON.stringify({ p: payload }) });
@@ -105,6 +106,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       // l'anonyme ne peut pas lire les rendez-vous
       R.anonRead = await pg.evaluate(async () => { const C = window.DL_CONFIG; const r = await fetch(C.SUPABASE_URL + '/rest/v1/appointments?select=*', { headers: { apikey: C.SUPABASE_ANON_KEY, 'Accept-Profile': 'drlife' } }); return r.status + ' ' + (await r.text()).slice(0, 80); });
     }
+    res.errsAfterDeliberateApiTests = res.errs.length - res.errsNormalFlow.length; delete res.errs; delete res.bad;
     await pg.close();
   }
   // mouvement réduit
