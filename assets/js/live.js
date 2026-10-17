@@ -141,7 +141,7 @@
       var L = [['Choix', 'Accompagnement'], ['Date', 'Date & heure'], ['Vous', 'Coordonnées'], ['Ok', 'Confirmation']];
       return '<ol class="bk-steps" aria-label="Étapes">' + L.map(function (l, i) {
         var n = i + 1, c = S.done ? 'done' : (n < S.step ? 'done' : n === S.step ? 'on' : '');
-        return '<li class="' + c + '"' + (n === S.step && !S.done ? ' aria-current="step"' : '') + '><b>' + n + '</b>' + l[1] + '</li>';
+        return '<li class="' + c + '"' + (n === S.step && !S.done ? ' aria-current="step"' : '') + '><b>' + n + '</b><span class="l-long">' + l[1] + '</span><span class="l-short" aria-hidden="true">' + l[0] + '</span></li>';
       }).join('') + '</ol>';
     }
     function recap() {
@@ -282,11 +282,11 @@
         var t = e.target;
         if (t.name === 'svc') { S.service = t.value; if (S.format && !allowed(S.format)) S.format = null; if (!S.format) { var f = formats().filter(function (x) { return allowed(x.key); }); if (f.length === 1) S.format = f[0].key; } S.err = ''; draw(); var c = box.querySelector('input[name=svc]:checked'); if (c) c.focus(); }
         else if (t.name === 'fmt') { S.format = t.value; S.err = ''; draw(); var c2 = box.querySelector('input[name=fmt]:checked'); if (c2) c2.focus(); }
-        else if (t.id === 'f-consent') { S.f.consent = t.checked; }
+        else if (t.id === 'f-consent') { S.f.consent = t.checked; var ce = $('#f-consent-e'); if (ce && t.checked) ce.textContent = ''; }
       });
       box.addEventListener('input', function (e) {
         var t = e.target, map = { 'f-name': 'name', 'f-phone': 'phone', 'f-email': 'email', 'f-msg': 'message', 'f-hp': 'hp' };
-        if (map[t.id]) S.f[map[t.id]] = t.value;
+        if (map[t.id]) { S.f[map[t.id]] = t.value; var fe = $('#' + t.id + '-e'); if (fe && fe.textContent) { fe.textContent = ''; var fl = fe.closest('.fld'); if (fl) fl.classList.remove('bad'); t.setAttribute('aria-invalid', 'false'); } }
       });
       box.addEventListener('submit', function (e) { e.preventDefault(); if (validate()) { S.step = 4; S.err = ''; draw(true); } });
       box.addEventListener('click', function (e) {
