@@ -98,25 +98,34 @@
   /* ---------- prise de rendez-vous ---------- */
   var ICO = R.icon;
   var BK = (function () {
-    var S = { step: 1, service: null, format: null, month: null, day: null, slot: null, f: { name: '', phone: '', email: '', message: '', consent: false, hp: '' }, cache: {}, loading: false, err: '', busy: false, done: null, ready: false };
+    var S = { step: 1, services: [], format: null, month: null, day: null, slot: null, f: { name: '', phone: '', email: '', message: '', consent: false, hp: '' }, cache: {}, loading: false, err: '', busy: false, done: null, ready: false };
     var box;
     function services() { return R.active(DATA && DATA.services && DATA.services.items); }
     function svc(id) { return services().filter(function (s) { return s.id === id; })[0]; }
     function formats() { var f = R.active(DATA && DATA.formats && DATA.formats.items); return f.length ? f : [{ key: 'cabinet', title: 'En cabinet' }, { key: 'visio', title: 'En visio' }, { key: 'telephone', title: 'Par téléphone' }]; }
     function fmtTitle(k) { var f = formats().filter(function (x) { return x.key === k; })[0]; return f ? f.title : (R.FMT[k] || k); }
-    function allowed(k) { var s = svc(S.service); return !s || !s.formats || !s.formats.length || s.formats.indexOf(k) >= 0; }
+    function sel() { return S.services.map(svc).filter(Boolean); }
+    function allowed(k) { return sel().every(function (s) { return !s.formats || !s.formats.length || s.formats.indexOf(k) >= 0; }); }
+    // Durée : même règle que le serveur (drlife._duration) — somme des « minutes » renseignées, arrondie au créneau, 240 min max ; sinon durée standard.
+    function minutes() {
+      var slot = (SET && SET.slot_minutes) || 60, tot = 0;
+      sel().forEach(function (s) { var m = String(s.minutes == null ? '' : s.minutes); if (/^\d{1,3}$/.test(m)) tot += Math.min(+m, 240); });
+      return Math.min(Math.max(slot, Math.ceil(tot / slot) * slot), Math.max(slot, Math.floor(240 / slot) * slot));
+    }
+    function toggle(id, on) { var i = S.services.indexOf(id); if (on && i < 0 && S.services.length < 5) S.services.push(id); if (!on && i >= 0) S.services.splice(i, 1); S.services = services().map(function (x) { return x.id; }).filter(function (x) { return S.services.indexOf(x) >= 0; }); if (S.format && !allowed(S.format)) S.format = null; S.slot = null; }
     function open() { return !!sb && (!SET || SET.booking_open !== false); }
     function maxDay() { return addDays(todayStr(), (SET && SET.max_days_ahead) || 60); }
 
     function fetchMonth(ym) {
-      if (S.cache[ym]) return Promise.resolve(S.cache[ym]);
+      var mins = minutes(), key = ym + '|' + mins;
+      if (S.cache[key]) return Promise.resolve(S.cache[key]);
       var t = todayStr(), from = ym + '-01', to = lastDay(ym);
       if (from < t) from = t; if (to > maxDay()) to = maxDay();
-      if (from > to) { S.cache[ym] = {}; return Promise.resolve(S.cache[ym]); }
-      return timeout(sb.rpc('get_slots', { p_from: from, p_to: to }), 9000).then(function (r) {
+      if (from > to) { S.cache[key] = {}; return Promise.resolve(S.cache[key]); }
+      return timeout(sb.rpc('get_slots', { p_from: from, p_to: to, p_minutes: mins }), 9000).then(function (r) {
         if (r.error) throw new Error(r._timeout ? 'Le calendrier met trop de temps à répondre.' : r.error.message);
         var m = {}; (r.data || []).forEach(function (x) { (m[x.day] = m[x.day] || []).push({ hhmm: x.hhmm, starts_at: x.starts_at }); });
-        S.cache[ym] = m; return m;
+        S.cache[key] = m; return m;
       });
     }
     function firstAvail(m) { var k = Object.keys(m).sort(); return k[0] || null; }
@@ -145,13 +154,13 @@
       }).join('') + '</ol>';
     }
     function recap() {
-      var s = svc(S.service), rows = [];
-      rows.push(['Accompagnement', s ? s.title : '—']);
+      var ss = S.done ? S.done.services : sel().map(function (x) { return { id: x.id, title: x.title, price: x.price }; }), rows = [];
+      rows.push([ss.length > 1 ? 'Accompagnements' : 'Accompagnement', ss.length ? ss.map(function (x) { return x.title; }).join(' + ') : '—']);
       rows.push(['Format', S.format ? fmtTitle(S.format) : '—']);
       rows.push(['Date', S.slot ? longDayY(S.day) : '—']);
-      rows.push(['Heure', S.slot ? S.slot.hhmm + ' (' + (((SET && SET.slot_minutes) || 60)) + ' min)' : '—']);
+      rows.push(['Heure', S.slot ? S.slot.hhmm + ' (' + (S.done && S.done.minutes ? S.done.minutes : minutes()) + ' min)' : '—']);
       if (S.step >= 4 || S.done) { rows.push(['Nom', S.f.name]); rows.push(['Téléphone', S.f.phone]); if (S.f.email) rows.push(['E-mail', S.f.email]); }
-      if (s) rows.push(['Tarif', s.price || 'Tarif sur demande']);
+      if (ss.length) { var pr = ss.map(function (x) { var o = svc(x.id); return (o && o.price) || 'Tarif sur demande'; }); rows.push(['Tarif', pr.every(function (x) { return x === pr[0]; }) ? pr[0] : pr.join(' · ')]); }
       return '<dl class="recap">' + rows.map(function (r) { return '<div><dt>' + esc(r[0]) + '</dt><dd>' + esc(r[1]) + '</dd></div>'; }).join('') + '</dl>';
     }
     function errBox() { return S.err ? '<p class="bk-err" role="alert">' + esc(S.err) + '</p>' : ''; }
@@ -161,18 +170,20 @@
         '<a class="btn btn-wa" href="' + waLink('Bonjour, je souhaite prendre rendez-vous avec Dr Life.') + '" target="_blank" rel="noopener">Écrire sur WhatsApp</a></div></div>';
     }
     function step1() {
-      var h = '<fieldset><legend id="bk-h" tabindex="-1">Quel accompagnement ?</legend><div class="chips">' + services().map(function (s) {
-        return '<label class="chip' + (S.service === s.id ? ' on' : '') + '"><input type="radio" name="svc" value="' + esc(s.id) + '"' + (S.service === s.id ? ' checked' : '') + '>' + ICO(s.icon, 'ico-s') + '<span>' + esc(s.title) + '<small>' + esc((s.duration ? s.duration + ' · ' : '') + (s.price || 'Tarif sur demande')) + '</small></span></label>';
-      }).join('') + '</div></fieldset>';
+      var n = S.services.length, mins = minutes();
+      var h = '<fieldset><legend id="bk-h" tabindex="-1">Quel(s) accompagnement(s) ?</legend><p class="mut sm" id="svc-help" style="margin:-.3rem 0 .7rem">Cochez un ou plusieurs thèmes (5 au maximum) : ils seront abordés pendant le même rendez-vous.</p><div class="chips" role="group" aria-describedby="svc-help">' + services().map(function (s) {
+        var on = S.services.indexOf(s.id) >= 0;
+        return '<label class="chip chip-check' + (on ? ' on' : '') + '"><input type="checkbox" name="svc" value="' + esc(s.id) + '"' + (on ? ' checked' : '') + '><i class="tick" aria-hidden="true"></i>' + ICO(s.icon, 'ico-s') + '<span>' + esc(s.title) + '<small>' + esc((s.duration ? s.duration + ' · ' : '') + (s.price || 'Tarif sur demande')) + '</small></span></label>';
+      }).join('') + '</div><p class="sel-count" aria-live="polite">' + (n ? n + ' accompagnement' + (n > 1 ? 's' : '') + ' sélectionné' + (n > 1 ? 's' : '') + ' · durée prévue ' + mins + ' min' : 'Aucun accompagnement sélectionné') + '</p></fieldset>';
       h += '<fieldset><legend>Quel format ?</legend><div class="fmts">' + formats().map(function (f) {
         var ok = allowed(f.key);
         return '<label class="chip' + (S.format === f.key ? ' on' : '') + (ok ? '' : ' dis') + '"><input type="radio" name="fmt" value="' + esc(f.key) + '"' + (S.format === f.key ? ' checked' : '') + (ok ? '' : ' disabled') + '>' + ICO(f.key, 'ico-s') + '<span>' + esc(f.title) + '</span></label>';
-      }).join('') + '</div>' + (S.service && formats().some(function (f) { return !allowed(f.key); }) ? '<p class="mut sm" style="margin:.5rem 0 0">Certains formats ne sont pas proposés pour cet accompagnement.</p>' : '') + '</fieldset>';
-      h += errBox() + '<div class="bk-nav"><button class="btn btn-solid" type="button" data-act="to2"' + (S.service && S.format ? '' : ' disabled') + '>Choisir une date →</button></div>';
+      }).join('') + '</div>' + (n && formats().some(function (f) { return !allowed(f.key); }) ? '<p class="mut sm" style="margin:.5rem 0 0">Certains formats ne sont pas proposés pour ' + (n > 1 ? 'l’un des accompagnements choisis' : 'cet accompagnement') + '.</p>' : '') + '</fieldset>';
+      h += errBox() + '<div class="bk-nav"><button class="btn btn-solid" type="button" data-act="to2"' + (n && S.format ? '' : ' disabled') + '>Choisir une date →</button></div>';
       return h;
     }
     function step2() {
-      var m = S.cache[S.month] || {}, t = todayStr(), ym = S.month;
+      var m = S.cache[S.month + '|' + minutes()] || {}, t = todayStr(), ym = S.month;
       var first = d0(ym + '-01'), off = (first.getUTCDay() + 6) % 7, last = +lastDay(ym).slice(8, 10);
       var prevOk = ym > monthOf(t), nextOk = addMonth(ym, 1) + '-01' <= maxDay();
       var cal = '<div class="cal"><div class="cal-head"><button type="button" data-act="prev" aria-label="Mois précédent"' + (prevOk && !S.loading ? '' : ' disabled') + '>‹</button><b aria-live="polite">' + esc(monthLabel(ym)) + '</b><button type="button" data-act="next" aria-label="Mois suivant"' + (nextOk && !S.loading ? '' : ' disabled') + '>›</button></div>';
@@ -219,7 +230,7 @@
         '<div class="bk-nav"><button class="btn btn-line" type="button" data-act="to3b">← Modifier</button><button class="btn btn-solid" type="button" data-act="book" id="bk-confirm"' + (S.busy ? ' disabled' : '') + '>' + (S.busy ? 'Envoi…' : 'Confirmer le rendez-vous') + '</button></div>';
     }
     function waText() {
-      var D = S.done; return 'Bonjour, je viens de réserver sur le site Dr Life.\nRéférence : ' + D.ref + '\nAccompagnement : ' + D.service + '\nFormat : ' + fmtTitle(D.format) + '\nDate : ' + longDayY(D.day) + ' à ' + D.hhmm + '\nNom : ' + S.f.name + '\nMerci de me confirmer le rendez-vous.';
+      var D = S.done; return 'Bonjour, je viens de réserver sur le site Dr Life.\nRéférence : ' + D.ref + (D.services.length > 1 ? '\nAccompagnements : ' : '\nAccompagnement : ') + D.services.map(function (x) { return x.title; }).join(', ') + '\nDurée prévue : ' + D.minutes + ' min' + '\nFormat : ' + fmtTitle(D.format) + '\nDate : ' + longDayY(D.day) + ' à ' + D.hhmm + '\nNom : ' + S.f.name + '\nMerci de me confirmer le rendez-vous.';
     }
     function doneView() {
       var D = S.done;
@@ -256,7 +267,7 @@
     }
     function book() {
       if (S.busy) return; S.busy = true; S.err = ''; draw();
-      var payload = { service: S.service, format: S.format, starts_at: S.slot.starts_at, name: S.f.name.trim(), phone: S.f.phone.trim(), email: S.f.email.trim(), message: S.f.message.trim(), hp: S.f.hp };
+      var payload = { services: S.services.slice(), format: S.format, starts_at: S.slot.starts_at, name: S.f.name.trim(), phone: S.f.phone.trim(), email: S.f.email.trim(), message: S.f.message.trim(), hp: S.f.hp };
       timeout(sb.rpc('book_appointment', { p: payload }), 15000).then(function (r) {
         S.busy = false;
         if (r.error) {
@@ -265,22 +276,27 @@
           S.err = msg; draw(true); say(msg); return;
         }
         var d = r.data || {};
-        S.done = { ref: d.ref, service: d.service || (svc(S.service) || {}).title, format: d.format || S.format, starts_at: d.starts_at, ends_at: d.ends_at, day: S.day, hhmm: S.slot.hhmm };
+        var list = (d.services && d.services.length ? d.services : sel()).map(function (x) { return { id: x.id, title: x.title }; });
+        S.done = { ref: d.ref, services: list, service: list.map(function (x) { return x.title; }).join(' + '), minutes: d.minutes || minutes(), format: d.format || S.format, starts_at: d.starts_at, ends_at: d.ends_at, day: S.day, hhmm: S.slot.hhmm };
         S.cache = {};
         draw(true); say('Rendez-vous enregistré. Référence ' + d.ref);
       });
     }
     function ics() {
       var D = S.done; if (!D) return;
+      function ics_esc(x) { return String(x).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n'); }
       function u(s) { return new Date(s).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, ''); }
       var t = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Dr Life//Rendez-vous//FR', 'CALSCALE:GREGORIAN', 'BEGIN:VEVENT', 'UID:' + D.ref + '@drlife', 'DTSTAMP:' + u(new Date()), 'DTSTART:' + u(D.starts_at), 'DTEND:' + u(D.ends_at || new Date(new Date(D.starts_at).getTime() + 3600000)),
-        'SUMMARY:Dr Life — ' + D.service + ' (' + fmtTitle(D.format) + ')', 'DESCRIPTION:Réf. ' + D.ref + ' — rendez-vous à confirmer avec le praticien. Tél. ' + (brand().phone || ''), 'LOCATION:' + (D.format === 'cabinet' ? 'Tlemcen' : 'En ligne'), 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
+        'SUMMARY:' + ics_esc('Dr Life — ' + D.services.map(function (x) { return x.title; }).join(' + ') + ' (' + fmtTitle(D.format) + ')'), 'DESCRIPTION:' + ics_esc('Réf. ' + D.ref + ' — accompagnement(s) : ' + D.services.map(function (x) { return x.title; }).join(', ') + ' (' + D.minutes + ' min). Rendez-vous à confirmer avec le praticien. Tél. ' + (brand().phone || '')), 'LOCATION:' + (D.format === 'cabinet' ? 'Tlemcen' : 'En ligne'), 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
       var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([t], { type: 'text/calendar;charset=utf-8' })); a.download = 'rendez-vous-' + D.ref + '.ics'; document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
     }
     function bind() {
       box.addEventListener('change', function (e) {
         var t = e.target;
-        if (t.name === 'svc') { S.service = t.value; if (S.format && !allowed(S.format)) S.format = null; if (!S.format) { var f = formats().filter(function (x) { return allowed(x.key); }); if (f.length === 1) S.format = f[0].key; } S.err = ''; draw(); var c = box.querySelector('input[name=svc]:checked'); if (c) c.focus(); }
+        if (t.name === 'svc') {
+          if (t.checked && S.services.length >= 5) { t.checked = false; S.err = 'Cinq accompagnements au maximum par rendez-vous.'; draw(); return; }
+          toggle(t.value, t.checked); if (!S.format) { var f = formats().filter(function (x) { return allowed(x.key); }); if (f.length === 1) S.format = f[0].key; }
+          S.err = ''; var v = t.value; draw(); var c = box.querySelector('input[name=svc][value="' + v + '"]'); if (c) c.focus(); }
         else if (t.name === 'fmt') { S.format = t.value; S.err = ''; draw(); var c2 = box.querySelector('input[name=fmt]:checked'); if (c2) c2.focus(); }
         else if (t.id === 'f-consent') { S.f.consent = t.checked; var ce = $('#f-consent-e'); if (ce && t.checked) ce.textContent = ''; }
       });
@@ -303,13 +319,13 @@
         else if (act === 'to3b') { S.step = 3; S.err = ''; draw(true); }
         else if (act === 'book') book();
         else if (act === 'ics') ics();
-        else if (act === 'again') { var keep = { name: S.f.name, phone: S.f.phone, email: S.f.email, message: '', consent: S.f.consent, hp: '' }; S = { step: 1, service: null, format: null, month: null, day: null, slot: null, f: keep, cache: {}, loading: false, err: '', busy: false, done: null }; draw(true); }
+        else if (act === 'again') { var keep = { name: S.f.name, phone: S.f.phone, email: S.f.email, message: '', consent: S.f.consent, hp: '' }; S = { step: 1, services: [], format: null, month: null, day: null, slot: null, f: keep, cache: {}, loading: false, err: '', busy: false, done: null }; draw(true); }
       });
     }
     return {
       init: function () { box = $('#bk'); if (!box) return; bind(); draw(); },
       refresh: function () { if (S.step === 2 && !S.done) goStep2(); else draw(); },
-      pick: function (id) { if (S.done) return; S.service = id; if (S.format && !allowed(S.format)) S.format = null; S.step = 1; S.err = ''; draw(); }
+      pick: function (id) { if (S.done) return; if (svc(id)) toggle(id, true); S.step = 1; S.err = ''; draw(); }
     };
   })();
   window.DL_BOOKING = BK;

@@ -38,11 +38,19 @@
   function localISO(day, time) { return day + 'T' + time + ':00+01:00'; }
   function telA(p) { return h('a', { href: 'tel:' + String(p || '').replace(/[^0-9+]/g, ''), text: p || '' }); }
   function intl(p) { var d = String(p || '').replace(/[^0-9+]/g, ''); if (d[0] === '+') return d.slice(1); if (d.slice(0, 2) === '00') return d.slice(2); if (d[0] === '0' && d.length === 10) return '213' + d.slice(1); return d; }
+  function svcTitles(a) { var l = Array.isArray(a.services) && a.services.length ? a.services.map(function (x) { return x.title || x.id; }) : [a.service_name || a.service_id || '']; return l.filter(Boolean); }
+  function durMin(a) { return a.duration_minutes || Math.round((new Date(a.ends_at) - new Date(a.starts_at)) / 60000) || 60; }
+  function svcFilterSel(onchange) {
+    var s = h('select', { 'aria-label': 'Filtrer par accompagnement' }, h('option', { value: '', text: 'Tous les accompagnements' }));
+    loadContent().then(function (d) { ((d.services || {}).items || []).forEach(function (x) { s.appendChild(h('option', { value: x.id, text: x.title + (x.active === false ? ' (masqué)' : '') })); }); }).catch(function () {});
+    s.onchange = onchange; return s;
+  }
+  function bySvc(q, id) { return id ? q.filter('services', 'cs', JSON.stringify([{ id: id }])) : q; }
   function waClient(a) {
     var when = dLong(a.starts_at) + ' à ' + hm(a.starts_at), f = FMT[a.format] || a.format, t;
     if (a.status === 'annulé') t = 'Bonjour ' + a.name + ', c’est Dr Life. Votre rendez-vous du ' + when + ' (réf. ' + a.ref + ') est annulé. Souhaitez-vous choisir un autre créneau ?';
     else if (a.status === 'terminé') t = 'Bonjour ' + a.name + ', c’est Dr Life. Merci pour la séance. N’hésitez pas à me écrire si vous avez une question.';
-    else t = 'Bonjour ' + a.name + ', c’est Dr Life. Je vous confirme votre rendez-vous « ' + (a.service_name || '') + ' » le ' + when + ' (' + f.toLowerCase() + '). Réf. ' + a.ref + '. À bientôt !';
+    else t = 'Bonjour ' + a.name + ', c’est Dr Life. Je vous confirme votre rendez-vous (' + svcTitles(a).join(', ') + ') le ' + when + ' (' + f.toLowerCase() + '). Réf. ' + a.ref + '. À bientôt !';
     return 'https://wa.me/' + intl(a.phone) + '?text=' + encodeURIComponent(t);
   }
   function field(label, obj, key, opt) {
@@ -129,7 +137,8 @@
       h('div', null,
         h('div', { class: 'when', text: dLong(a.starts_at) + ' · ' + hm(a.starts_at) + '–' + hm(a.ends_at) }),
         h('p', null, h('b', { text: a.name }), ' ', badge, ' · ', telA(a.phone), a.email ? [' · ', h('a', { href: 'mailto:' + a.email, text: a.email })] : null),
-        h('p', { class: 'sm', text: '🧩 ' + (a.service_name || a.service_id) + ' · ' + (FMT[a.format] || a.format) + ' · réf. ' + a.ref + ' · ' + (a.source === 'admin' ? 'ajouté par vous' : 'réservé en ligne') + ' le ' + dt(a.created_at) }),
+        h('div', { class: 'svc-tags', 'aria-label': 'Accompagnements' }, svcTitles(a).map(function (t) { return h('span', { class: 'tag', text: t }); }), h('span', { class: 'mut sm', text: durMin(a) + ' min' })),
+        h('p', { class: 'sm', text: (FMT[a.format] || a.format) + ' · réf. ' + a.ref + ' · ' + (a.source === 'admin' ? 'ajouté par vous' : 'réservé en ligne') + ' le ' + dt(a.created_at) }),
         a.message ? h('p', { text: '💬 ' + a.message }) : null,
         h('div', { style: 'margin-top:.4rem' }, note, h('div', { class: 'row', style: 'margin-top:.3rem' }, saveNote, del))),
       h('div', { class: 'acts' }, sel, wa));
@@ -142,8 +151,8 @@
     var filt = h('select', { 'aria-label': 'Filtre' }, [['upcoming', 'À venir (en attente + confirmés)'], ['en attente', 'En attente'], ['confirmé', 'Confirmés'], ['terminé', 'Terminés'], ['annulé', 'Annulés'], ['today', 'Aujourd’hui'], ['past', 'Passés'], ['', 'Tous']].map(function (o) { return h('option', { value: o[0], text: o[1] }); }));
     var from = h('input', { type: 'date', 'aria-label': 'Du' }), to = h('input', { type: 'date', 'aria-label': 'Au' });
     var q = h('input', { type: 'search', placeholder: 'Nom, téléphone ou réf.' });
-    var list = h('div'), addBox = h('div');
-    m.appendChild(h('div', { class: 'crm-bar' }, filt, h('span', { class: 'mut sm', text: 'du' }), from, h('span', { class: 'mut sm', text: 'au' }), to, q,
+    var list = h('div'), addBox = h('div'), sf = svcFilterSel(function () { load(); });
+    m.appendChild(h('div', { class: 'crm-bar' }, filt, sf, h('span', { class: 'mut sm', text: 'du' }), from, h('span', { class: 'mut sm', text: 'au' }), to, q,
       h('button', { class: 'btn btn-line btn-sm', type: 'button', text: '↻ Actualiser', onclick: load }),
       h('button', { class: 'btn btn-solid btn-sm', type: 'button', text: '+ Ajouter un rendez-vous', onclick: function () { addBox.hidden = !addBox.hidden; } })));
     addBox.hidden = true; m.appendChild(addBox); addForm(addBox, load);
@@ -173,6 +182,7 @@
       if (from.value) qq = qq.gte('starts_at', localISO(from.value, '00:00'));
       if (to.value) qq = qq.lt('starts_at', localISO(addDays(to.value, 1), '00:00'));
       var s = q.value.trim().replace(/[,()*%]/g, ' ').trim();
+      qq = bySvc(qq, sf.value);
       if (s) qq = qq.or('name.ilike.*' + s + '*,phone.ilike.*' + s + '*,ref.ilike.*' + s + '*');
       qq.then(function (r) {
         if (r.error) return toast(r.error.message, true);
@@ -187,16 +197,19 @@
   function addForm(box, after) {
     var o = { day: todayStr(), time: '09:00', status: 'confirmé', format: 'cabinet', name: '', phone: '', email: '', message: '' };
     loadContent().then(function (d) {
-      var sv = {}; ((d.services || {}).items || []).forEach(function (s) { sv[s.id] = s.title; }); o.service = Object.keys(sv)[0];
+      var sv = {}, chosen = []; ((d.services || {}).items || []).forEach(function (s) { sv[s.id] = s.title; });
+      var pick = h('div', { class: 'f' }, h('span', { text: 'Accompagnement(s) — un ou plusieurs' }), h('div', { class: 'row' }, Object.keys(sv).map(function (k) { var c = h('input', { type: 'checkbox', value: k }); c.onchange = function () { chosen = Object.keys(sv).filter(function (x) { return x === k ? c.checked : chosen.indexOf(x) >= 0; }); }; return h('label', { class: 'switch' }, c, sv[k]); })));
       box.appendChild(h('section', { class: 'card' }, h('h3', { text: 'Ajouter un rendez-vous (pris par téléphone, WhatsApp…)' }),
         h('div', { class: 'grid3' }, field('Date', o, 'day', {  type: 'date' , free: 1 }), field('Heure', o, 'time', {  type: 'time' , free: 1 }), select('Statut', o, 'status', { 'confirmé': 'confirmé', 'en attente': 'en attente' }, 1)),
-        h('div', { class: 'grid2' }, select('Accompagnement', o, 'service', sv, 1), select('Format', o, 'format', FMT, 1)),
+        pick, h('div', { class: 'grid2' }, select('Format', o, 'format', FMT, 1)),
         h('div', { class: 'grid3' }, field('Nom', o, 'name', { free: 1 }), field('Téléphone', o, 'phone', {  inputmode: 'tel' , free: 1 }), field('E-mail (facultatif)', o, 'email', { free: 1 })),
         field('Message / motif (facultatif)', o, 'message', {  type: 'textarea' , free: 1 }),
         h('button', { class: 'btn btn-solid', type: 'button', text: 'Enregistrer le rendez-vous', onclick: function () {
           DIRTY = false;
           if (!o.day || !/^\d\d:\d\d$/.test(o.time)) return toast('Date ou heure invalide.', true);
-          sb.from('appointments').insert({ starts_at: localISO(o.day, o.time), status: o.status, service_id: o.service, service_name: sv[o.service], format: o.format, name: o.name, phone: o.phone, email: o.email || null, message: o.message || null, source: 'admin' }).select('ref').single().then(function (r) {
+          if (!chosen.length) return toast('Cochez au moins un accompagnement.', true);
+          if (chosen.length > 5) return toast('Cinq accompagnements au maximum.', true);
+          sb.from('appointments').insert({ starts_at: localISO(o.day, o.time), status: o.status, services: chosen.map(function (k) { return { id: k, title: sv[k] }; }), format: o.format, name: o.name, phone: o.phone, email: o.email || null, message: o.message || null, source: 'admin' }).select('ref').single().then(function (r) {
             if (r.error) return toast(/dl_appt|duplicate|conflict|exclusion/i.test(r.error.message) ? 'Ce créneau chevauche un rendez-vous existant.' : /check/i.test(r.error.message) ? 'Vérifiez le nom (2 caractères min.) et le téléphone.' : r.error.message, true);
             toast('Rendez-vous ' + r.data.ref + ' ajouté'); box.hidden = true; box.innerHTML = ''; addForm(box, after); after();
           });
@@ -210,16 +223,18 @@
     m.appendChild(h('h2', { text: '🗓️ Calendrier' }));
     var label = h('b', { style: 'font:500 1.4rem Georgia,serif;min-width:12rem;text-align:center;text-transform:capitalize' });
     var cb = h('input', { type: 'checkbox' }); cb.onchange = function () { showCancel = cb.checked; load(); };
+    var csf = svcFilterSel(function () { load(); });
     m.appendChild(h('div', { class: 'crm-bar' }, h('button', { class: 'btn btn-line btn-sm', type: 'button', text: '‹', 'aria-label': 'Mois précédent', onclick: function () { ym = addMonth(ym, -1); load(); } }), label,
       h('button', { class: 'btn btn-line btn-sm', type: 'button', text: '›', 'aria-label': 'Mois suivant', onclick: function () { ym = addMonth(ym, 1); load(); } }),
       h('button', { class: 'btn btn-line btn-sm', type: 'button', text: 'Aujourd’hui', onclick: function () { ym = todayStr().slice(0, 7); load(); } }),
-      h('label', { class: 'switch sm' }, cb, 'Afficher les annulés')));
+      h('label', { class: 'switch sm' }, cb, 'Afficher les annulés'), csf));
     var grid = h('div', { class: 'acal' }), day = h('div');
     m.appendChild(grid); m.appendChild(h('p', { class: 'mut sm', text: 'Hachuré = date bloquée · grisé = jour fermé · cliquez sur un jour pour voir le détail.' })); m.appendChild(day);
     function load() {
       label.textContent = d0(ym + '-01').toLocaleDateString('fr-FR', { month: 'long', year: 'numeric', timeZone: 'UTC' });
       var q = sb.from('appointments').select('*').gte('starts_at', localISO(ym + '-01', '00:00')).lt('starts_at', localISO(addDays(lastDay(ym), 1), '00:00')).order('starts_at');
       if (!showCancel) q = q.neq('status', 'annulé');
+      q = bySvc(q, csf.value);
       Promise.all([q, sb.from('blocked_dates').select('day,note').gte('day', ym + '-01').lte('day', lastDay(ym)), sb.from('settings').select('week').eq('id', 1).maybeSingle()]).then(function (rs) {
         if (rs[0].error) return toast(rs[0].error.message, true);
         var by = {}, blk = {}, week = (rs[2].data && rs[2].data.week) || {};
@@ -233,7 +248,7 @@
           var iso = ((d0(ds).getUTCDay() + 6) % 7) + 1, closed = !(week[iso] || []).length, list = by[ds] || [];
           var cell = h('button', { type: 'button', class: 'd' + (blk[ds] ? ' blk' : '') + (closed ? ' closed' : '') + (ds === todayStr() ? ' today' : '') + (ds === selDay ? ' sel' : ''), title: blk[ds] ? 'Date bloquée : ' + blk[ds] : '' },
             h('span', { class: 'n', text: String(+ds.slice(8)) + (list.length ? ' · ' + list.length : '') }),
-            list.slice(0, 4).map(function (a) { return h('span', { class: 'ev st-' + slug(a.status), text: hm(a.starts_at) + ' ' + a.name }); }),
+            list.slice(0, 4).map(function (a) { return h('span', { class: 'ev st-' + slug(a.status), title: hm(a.starts_at) + '–' + hm(a.ends_at) + ' · ' + a.name + ' · ' + svcTitles(a).join(' + '), text: hm(a.starts_at) + ' ' + a.name + (svcTitles(a).length > 1 ? ' (' + svcTitles(a).length + ')' : '') }); }),
             list.length > 4 ? h('span', { class: 'sm mut', text: '+' + (list.length - 4) }) : null);
           cell.onclick = function () { selDay = ds; showDay(ds, list, blk[ds]); grid.querySelectorAll('.d').forEach(function (x) { x.classList.remove('sel'); }); cell.classList.add('sel'); };
           grid.appendChild(cell);
@@ -336,6 +351,8 @@
       if (!s.id) s.id = s.title.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || ('service-' + Date.now());
       if (ids[s.id]) s.id += '-' + Math.random().toString(36).slice(2, 5); ids[s.id] = 1;
       if (!s.formats || !s.formats.length) err = 'L’accompagnement « ' + s.title + ' » doit proposer au moins un format.';
+      var mn = String(s.minutes == null ? '' : s.minutes).trim();
+      if (mn === '') delete s.minutes; else if (!/^\d{1,3}$/.test(mn) || +mn < 5 || +mn > 240) err = 'Durée de « ' + s.title + ' » : indiquez un nombre de minutes entre 5 et 240, ou laissez vide.'; else s.minutes = +mn;
     });
     if (err) return toast(err, true);
     sb.from('site_content').update({ data: CONTENT }).eq('id', 1).select('data').single().then(function (r) {
@@ -390,7 +407,7 @@
           list.appendChild(h('section', { class: 'card' }, h('h3', { text: s.title || 'Nouvel accompagnement' }),
             h('div', { class: 'grid2' }, field('Titre', s, 'title'), select('Icône', s, 'icon', ICONS)),
             field('Description', s, 'text', { type: 'textarea', rows: 3 }),
-            h('div', { class: 'grid2' }, field('Tarif affiché', s, 'price', { ph: 'Tarif sur demande' }), field('Durée affichée', s, 'duration', { ph: '60 min' })),
+            h('div', { class: 'grid3' }, field('Tarif affiché', s, 'price', { ph: 'Tarif sur demande' }), field('Durée affichée', s, 'duration', { ph: '60 min' }), field('Durée réelle en minutes (facultatif)', s, 'minutes', { type: 'number', ph: 'vide = 60', hint: 'Si plusieurs accompagnements sont choisis, leurs durées s’additionnent (arrondi au créneau, 4 h max).' })),
             h('div', { class: 'f' }, h('span', { text: 'Formats proposés' }), fm),
             field('Visible sur le site et réservable', s, 'active', { type: 'checkbox' }),
             h('div', { class: 'row', style: 'margin-top:.5rem' }, mover(S.items, i, draw))));

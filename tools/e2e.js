@@ -42,6 +42,13 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     await pg.evaluate(() => document.querySelector('.svc[data-id="stress"] .svc-go').scrollIntoView({ block: 'center' })); await sleep(400);
     await pg.click('.svc[data-id="stress"] .svc-go'); await sleep(1200);
     res.preselected = await pg.$eval('input[name=svc][value=stress]', e => e.checked);
+    res.inputType = await pg.$eval('input[name=svc]', e => e.type);
+    const extra = W < 600 ? ['emotions'] : ['sommeil', 'confiance'];
+    for (const id of extra) { const sel = 'label.chip:has(input[name=svc][value="' + id + '"])'; await pg.evaluate(s => document.querySelector(s).scrollIntoView({ block: 'center' }), sel); await sleep(200); await pg.click(sel); await sleep(350); }
+    res.checkedServices = await pg.$$eval('input[name=svc]:checked', e => e.map(x => x.value));
+    res.selCount = await pg.$eval('.sel-count', e => e.textContent);
+    // on décoche puis recoche le dernier pour vérifier le basculement
+    { const sel = 'label.chip:has(input[name=svc][value="' + extra[extra.length - 1] + '"])'; await pg.click(sel); await sleep(300); res.afterUncheck = await pg.$$eval('input[name=svc]:checked', e => e.length); await pg.click(sel); await sleep(300); }
     await pg.evaluate(() => document.querySelector('input[name=fmt][value=visio]').closest('label').scrollIntoView({ block: 'center' })); await sleep(300);
     await pg.click('input[name=fmt][value=visio] + svg'); await sleep(400);
     res.fmtChecked = await pg.$eval('input[name=fmt][value=visio]', e => e.checked);
@@ -73,12 +80,17 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     await pg.screenshot({ path: OUT + tag + '_' + String(n++).padStart(2, '0') + '_booking_3_coordonnees.png' });
     await pg.click('#bk-form [type=submit]'); await pg.waitForSelector('#bk-confirm', { timeout: 5000 }); await sleep(400);
     await pg.screenshot({ path: OUT + tag + '_' + String(n++).padStart(2, '0') + '_booking_4_recap.png' });
+    res.recap = await pg.$eval('.bk-main .recap', e => e.innerText.replace(/\s+/g, ' '));
     await pg.evaluate(() => document.getElementById('bk-confirm').scrollIntoView({ block: 'center' })); await sleep(200);
     await pg.click('#bk-confirm');
     await pg.waitForSelector('#bk-ref', { timeout: 20000 }); await sleep(1300);
     res.ref = await pg.$eval('#bk-ref', e => e.textContent.trim()); R.refs.push(res.ref);
     res.wa = await pg.$eval('#bk-wa', e => decodeURIComponent(e.href));
     res.waOk = res.wa.startsWith('https://wa.me/213552998411?text=') && res.wa.includes(res.ref);
+    res.confirmRecap = await pg.$eval('.done .recap', e => e.innerText.replace(/\s+/g, ' '));
+    await pg.evaluate(() => { window.__ics = null; const o = URL.createObjectURL; URL.createObjectURL = function (b) { if (b && b.text) b.text().then(t => { window.__ics = t; }); return o.call(URL, b); }; });
+    await pg.click('[data-act=ics]'); await sleep(800);
+    res.ics = await pg.evaluate(() => window.__ics);
     await pg.evaluate(() => document.getElementById('bk-ref').scrollIntoView({ block: 'center' })); await sleep(500);
     await pg.screenshot({ path: OUT + tag + '_' + String(n++).padStart(2, '0') + '_booking_5_confirmation.png' });
     res.errsNormalFlow = res.errs.slice(); res.badNormalFlow = res.bad.slice();
@@ -87,22 +99,25 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       const C = window.DL_CONFIG; const r = await fetch(C.SUPABASE_URL + '/rest/v1/rpc/book_appointment', { method: 'POST', headers: { apikey: C.SUPABASE_ANON_KEY, 'Content-Type': 'application/json', 'Content-Profile': 'drlife' }, body: JSON.stringify({ p: payload }) });
       return { status: r.status, body: await r.json() };
     }, payload);
-    const dbl = await rpc({ service: 'confiance', format: 'cabinet', starts_at: chosen.starts_at, name: 'TEST E2E double', phone: '0550 00 99 0' + (W < 600 ? '1' : '2') });
+    const dbl = await rpc({ services: ['confiance', 'habitudes'], format: 'cabinet', starts_at: chosen.starts_at, name: 'TEST E2E double', phone: '0550 00 99 0' + (W < 600 ? '1' : '2') });
     res.doubleBooking = { status: dbl.status, refused: dbl.status >= 400, message: dbl.body && dbl.body.message };
     if (dbl.body && dbl.body.ref) R.refs.push(dbl.body.ref);
     res.slotHiddenAfter = await pg.evaluate(async (s) => { const C = window.DL_CONFIG; const day = s.day; const r = await fetch(C.SUPABASE_URL + '/rest/v1/rpc/get_slots', { method: 'POST', headers: { apikey: C.SUPABASE_ANON_KEY, 'Content-Type': 'application/json', 'Content-Profile': 'drlife' }, body: JSON.stringify({ p_from: day, p_to: day }) }); const j = await r.json(); return !j.some(x => x.starts_at === s.starts_at || new Date(x.starts_at).getTime() === new Date(s.starts_at).getTime()); }, res.chosen);
     if (W > 600) {
       // course : deux réservations simultanées sur un autre créneau libre
       const free = await pg.evaluate(async (d) => { const C = window.DL_CONFIG; const r = await fetch(C.SUPABASE_URL + '/rest/v1/rpc/get_slots', { method: 'POST', headers: { apikey: C.SUPABASE_ANON_KEY, 'Content-Type': 'application/json', 'Content-Profile': 'drlife' }, body: JSON.stringify({ p_from: d, p_to: d }) }); return (await r.json()).pop(); }, pick);
-      const race = await Promise.all([rpc({ service: 'sommeil', format: 'telephone', starts_at: free.starts_at, name: 'TEST E2E course A', phone: '0550 00 77 01' }), rpc({ service: 'sommeil', format: 'telephone', starts_at: free.starts_at, name: 'TEST E2E course B', phone: '0550 00 77 02' })]);
+      const race = await Promise.all([rpc({ services: ['sommeil', 'stress'], format: 'telephone', starts_at: free.starts_at, name: 'TEST E2E course A', phone: '0550 00 77 01' }), rpc({ services: ['sommeil', 'stress'], format: 'telephone', starts_at: free.starts_at, name: 'TEST E2E course B', phone: '0550 00 77 02' })]);
       race.forEach(x => { if (x.body && x.body.ref) R.refs.push(x.body.ref); });
       R.race = { slot: free.hhmm + ' ' + free.day, successes: race.filter(x => x.status < 300).length, errors: race.filter(x => x.status >= 400).map(x => x.body.message) };
       // validations serveur
       const v1 = await rpc({ service: 'stress', format: 'visio', starts_at: free.starts_at, name: 'X', phone: '12' });
-      const v2 = await rpc({ service: 'inconnu', format: 'visio', starts_at: free.starts_at, name: 'Test', phone: '0550000000' });
-      const v3 = await rpc({ service: 'stress', format: 'visio', starts_at: free.starts_at, name: 'Test', phone: '0550000000', hp: 'bot' });
-      const v4 = await rpc({ service: 'couple', format: 'telephone', starts_at: free.starts_at, name: 'Test', phone: '0550000000' });
-      R.serverValidation = [v1, v2, v3, v4].map(x => x.status + ' ' + (x.body && x.body.message));
+      const v2 = await rpc({ services: ['stress', 'inconnu'], format: 'visio', starts_at: free.starts_at, name: 'Test', phone: '0550000000' });
+      const v3 = await rpc({ services: ['stress'], format: 'visio', starts_at: free.starts_at, name: 'Test', phone: '0550000000', hp: 'bot' });
+      const v5 = await rpc({ services: [], format: 'visio', starts_at: free.starts_at, name: 'Test', phone: '0550000000' });
+      const v6 = await rpc({ services: ['stress', 'stress'], format: 'visio', starts_at: free.starts_at, name: 'Test', phone: '0550000000' });
+      const v7 = await rpc({ services: ['stress', 'sommeil', 'confiance', 'emotions', 'habitudes', 'anxiete'], format: 'visio', starts_at: free.starts_at, name: 'Test', phone: '0550000000' });
+      const v4 = await rpc({ services: ['stress', 'couple'], format: 'telephone', starts_at: free.starts_at, name: 'Test', phone: '0550000000' });
+      R.serverValidation = [v1, v2, v3, v4, v5, v6, v7].map(x => x.status + ' ' + (x.body && x.body.message));
       // l'anonyme ne peut pas lire les rendez-vous
       R.anonRead = await pg.evaluate(async () => { const C = window.DL_CONFIG; const r = await fetch(C.SUPABASE_URL + '/rest/v1/appointments?select=*', { headers: { apikey: C.SUPABASE_ANON_KEY, 'Accept-Profile': 'drlife' } }); return r.status + ' ' + (await r.text()).slice(0, 80); });
     }

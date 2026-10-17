@@ -327,3 +327,8 @@ p{margin:0 0 1rem}
   .neuro-draw path,.done-ico path{stroke-dashoffset:0;animation:none}
   .neuro-draw .n-dots circle{animation:none}
 }
+/* v2 : choix multiple des accompagnements */
+.chip-check .tick{flex:none;width:20px;height:20px;border-radius:6px;border:1.5px solid rgba(16,52,58,.35);background:#fff;position:relative;transition:background .2s,border-color .2s}
+.chip-check.on .tick,.chip-check:has(input:checked) .tick{background:var(--ink);border-color:var(--ink)}
+.chip-check.on .tick::after,.chip-check:has(input:checked) .tick::after{content:"";position:absolute;left:6px;top:2px;width:5px;height:10px;border:solid var(--cream);border-width:0 2px 2px 0;transform:rotate(45deg)}
+.sel-count{margin:.7rem 0 0;font-size:.88rem;font-weight:600;color:var(--teal)}

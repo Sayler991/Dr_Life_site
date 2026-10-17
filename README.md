@@ -56,3 +56,19 @@ Rendez-vous (filtres à venir / statut / aujourd’hui / passés / dates / reche
 ## Tests
 - `node tools/e2e.js https://sayler991.github.io/Dr_Life_site/ /workspace/drlife_shots/` — 1440 et 375 px, réservations « TEST E2E » réelles (supprimées ensuite), double réservation refusée, mouvement réduit, admin (mauvais mot de passe refusé).
 - `node tools/admin_preview.js BASE OUT` — aperçu de chaque onglet de l’admin avec un faux client et des données fictives (sans connexion réelle).
+
+## Version 2 — plusieurs accompagnements par rendez-vous
+
+- **Réservation** : à l’étape 1, le client coche **un ou plusieurs** accompagnements (5 au maximum, au moins 1). Un seul créneau est réservé pour l’ensemble.
+  Seuls les formats proposés par **tous** les accompagnements cochés restent sélectionnables.
+- Les accompagnements choisis apparaissent dans le récapitulatif, l’écran de confirmation, le message WhatsApp, le fichier agenda (.ics), la liste et le calendrier de l’espace praticien.
+  L’espace praticien propose aussi un filtre « Tous les accompagnements » et l’ajout manuel avec plusieurs cases.
+- **Durée** (facultatif) : dans « Accompagnements & tarifs », le champ « Durée réelle en minutes » (5 à 240) permet d’allonger un rendez-vous.
+  Les durées des accompagnements cochés s’additionnent, avec un arrondi au créneau supérieur et un maximum de 4 h. Le serveur ne propose alors que les heures où **tous les créneaux consécutifs** nécessaires sont libres.
+  Si le champ reste vide, le rendez-vous dure 60 min (la durée du créneau).
+- **Base de données** : `supabase/migration_v2.sql` (déjà appliquée).
+  Elle ajoute la colonne `appointments.services` (liste JSON `[{id, title, minutes}]`) et `duration_minutes`, met à jour `get_slots(p_from, p_to, p_minutes)` et `book_appointment`, et reprend les anciens rendez-vous à l’identique.
+  `service_id` et `service_name` sont conservés : ce sont le premier accompagnement et les titres joints par « + ».
+  L’ancien appel avec un seul `service` reste accepté.
+- La protection contre les doubles réservations (index unique + contrainte d’exclusion sur toute la durée) et les limites anti-abus sont inchangées.
+- **Retour arrière** : le tag Git `v1` contient le site précédent ; le tag `v2` contient cette version.

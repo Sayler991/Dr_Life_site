@@ -60,3 +60,6 @@ a{color:var(--teal)}
 .wk{display:grid;grid-template-columns:110px 1fr;gap:.6rem;align-items:start;padding:.6rem 0;border-bottom:1px solid var(--line)}
 .wk .rg{display:flex;gap:.4rem;align-items:center;margin-bottom:.35rem;flex-wrap:wrap}.wk .rg input{width:auto}
 @media(max-width:760px){.layout{grid-template-columns:1fr}.side{flex-direction:row;overflow:auto;border-right:0;border-bottom:1px solid var(--line);position:sticky;top:58px;z-index:4}.side button{white-space:nowrap}.side button.on{box-shadow:inset 0 -3px 0 var(--gold)}.grid2,.grid3{grid-template-columns:1fr}header.top{flex-wrap:wrap}#status{display:none}main{padding:1rem}.savebar{margin:1rem -1rem -1rem}.appt{grid-template-columns:1fr}.appt .acts{align-items:flex-start;flex-direction:row;flex-wrap:wrap}.acal .d{min-height:58px}.acal .ev{font-size:0;height:6px;padding:0}.wk{grid-template-columns:1fr}}
+/* v2 : accompagnements multiples */
+.svc-tags{display:flex;flex-wrap:wrap;gap:.3rem;align-items:center;margin:.35rem 0 .2rem}
+.svc-tags .tag{display:inline-block;padding:.15rem .55rem;border-radius:999px;background:#d9e6e3;color:#10343a;font-size:.8rem;font-weight:600}
